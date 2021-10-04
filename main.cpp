@@ -9,6 +9,7 @@
 
 #include <string_view>
 #include <stdexcept>
+#include<set>
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -105,6 +106,7 @@ struct vertex
     std::uint8_t color[4];
 };
 
+
 static vertex cube_vertices[]
         {
                 // -X
@@ -155,6 +157,49 @@ static std::uint32_t cube_indices[]
                 20, 21, 22, 22, 21, 23,
         };
 
+// Square matrix multiplication
+void matrix_multiply(const float* a, const float* b, float* c, size_t size) {
+    std::fill(c, c + size * size, 0);
+    for (int i = 0; i < size; i ++) {
+        for (int j = 0; j < size; j++) {
+            for (int k = 0; k < size; k++) {
+                // c[i, j] = a[i, k] * b[k, j]
+                c[i * size + j] += a[i * size + k] * b[k * size + j];
+//                std::cout << "pos " << i * size + j << ' ' << i * size + k << '*' << k * size + j << '\n';
+//                std::cout << "val " << c[i * size + j] << ' ' << a[i * size + k] << '*' << b[k * size + j] << "\n \n";
+            }
+        }
+    }
+}
+
+struct GridSize {
+    int x;
+    int y;
+    int z;
+};
+
+//float function(int x, int y, GridSize size) {
+//    float x_point = // TODO: [0, GridSize.x] -> [-3, 3];
+//    float y_point = ;
+//    return // TODO: Function f(x, y)
+//}
+
+std::uint32_t get_vertex_index(int x, int y, int z, GridSize size) {
+    // [0..a]x[0..b]x[0..c] --> [0..a*b*c]
+    return x + size.x * (z + size.y * y);
+}
+
+std::tuple<int, int, int> index_to_vertex(int index, GridSize size) {
+    int y = index / (size.x * size.y);
+    int z = (index / (size.x)) % size.x;
+    int x = index % size.x;
+    return {x, y, z};
+}
+
+float grid_index_to_float(int x, GridSize gridSize) {
+    return (float)x / gridSize.x;
+}
+
 int main() try
 {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -202,15 +247,63 @@ int main() try
     GLuint view_location = glGetUniformLocation(program, "view");
     GLuint transform_location = glGetUniformLocation(program, "transform");
 
+    // Init graph vertices
 
+    // Should be the same size, really
+    int A = 20, B = 20, C = 20;
+    GridSize gridSize{A, B, C};
+    vertex graph_vertices[A * B * C];
+//    {
+//        // ground
+//        {{0, 0, 0}, {0, 255, 255, 255}},
+//        // only x
+//        {{1, 0, 0}, {0, 0, 255, 255}},
+//        // only y
+//        {{0, 1, 0}, {0, 0, 0, 0}},
+//        // only z
+//        {{0, 0, 1}, {0, 255, 255, 0}},
+//        // x and y
+//        {{1, 1, 0}, {0, 255, 255, 255}},
+//        // y and z
+//        {{0, 1, 1}, {0, 255, 255, 255}},
+//        // x and z
+//        {{1, 0, 1}, {0, 255, 255, 255}}
+//    };
+
+
+
+    std::set<std::uint32_t> grid_corners;
+    grid_corners.insert(get_vertex_index(0, 0, 0, gridSize));
+    grid_corners.insert(get_vertex_index(gridSize.x - 1, 0, 0, gridSize));
+    grid_corners.insert(get_vertex_index(0, gridSize.y - 1, 0, gridSize));
+    grid_corners.insert(get_vertex_index(0, 0, gridSize.z - 1, gridSize));
+    grid_corners.insert(get_vertex_index(gridSize.x - 1, gridSize.y - 1, 0, gridSize));
+    grid_corners.insert(get_vertex_index(0, gridSize.y - 1, gridSize.z - 1, gridSize));
+    grid_corners.insert(get_vertex_index(gridSize.x - 1, 0, gridSize.z - 1, gridSize));
+
+    for (int index = 0; index < A * B * C; index ++) {
+        auto [i, j, k] = index_to_vertex(index, gridSize);
+
+        if (grid_corners.contains(index)) {
+            // black
+            graph_vertices[index] = {{grid_index_to_float(i, gridSize), grid_index_to_float(j, gridSize), grid_index_to_float(k, gridSize)},
+                                     {0, 0, 0, 0}};
+        } else {
+            // gray
+            graph_vertices[index] = {{grid_index_to_float(i, gridSize), grid_index_to_float(j, gridSize), grid_index_to_float(k, gridSize)},
+                                     {50, 100, 100, 0}};
+        }
+        std::cout << "Index " << index << ' ' << "Vertex: " << i << ' ' << j << ' ' << k << '\n';
+        assert(get_vertex_index(i, j, k, gridSize) == index);
+    }
 
     GLuint vbo;
     glGenBuffers(1, &vbo);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER,
-                 sizeof(cube_vertices),
-                 cube_vertices, GL_STATIC_DRAW);
+                 sizeof(graph_vertices),
+                 graph_vertices, GL_STATIC_DRAW);
 
     GLuint vao;
 
@@ -219,10 +312,58 @@ int main() try
     glBindVertexArray(vao);
 
 
+    std::vector<std::uint32_t> line_indices;
+
+    // MAIN GRID
+    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
+    line_indices.push_back(get_vertex_index(gridSize.x - 1, 0, 0, gridSize));
+    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
+    line_indices.push_back(get_vertex_index(0, gridSize.y - 1, 0, gridSize));
+    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
+    line_indices.push_back(get_vertex_index(0, 0, gridSize.z - 1, gridSize));
+
+    for(auto &x: line_indices) {
+        std::cout << x << ' ';
+    }
+
+//    // X grid
+
+    int draw_grid_freq = 5;
+
+    for (int i = 0; i < gridSize.x; i++) {
+        if (i % draw_grid_freq != 0 && i != gridSize.x - 1) continue;
+        line_indices.push_back(get_vertex_index(i, 0, 0, gridSize));
+        line_indices.push_back(get_vertex_index(i, 0, gridSize.z - 1, gridSize));
+
+        line_indices.push_back(get_vertex_index(i, 0, 0, gridSize));
+        line_indices.push_back(get_vertex_index(i, gridSize.y - 1, 0, gridSize));
+    }
+
+    //  Y grid
+    for (int i = 0; i < gridSize.y; i++) {
+        if (i % draw_grid_freq != 0 && i != gridSize.y - 1) continue;
+        line_indices.push_back(get_vertex_index(0, i, 0, gridSize));
+        line_indices.push_back(get_vertex_index(gridSize.x - 1, i, 0, gridSize));
+
+        line_indices.push_back(get_vertex_index(0, i, 0, gridSize));
+        line_indices.push_back(get_vertex_index(0, i, gridSize.z - 1, gridSize));
+    }
+
+    // Z grid
+    for (int i = 0; i < gridSize.z; i++) {
+        if (i % draw_grid_freq != 0 && i != gridSize.z - 1) continue;
+        line_indices.push_back(get_vertex_index(0, 0, i, gridSize));
+        line_indices.push_back(get_vertex_index(gridSize.x - 1, 0, i, gridSize));
+
+        line_indices.push_back(get_vertex_index(0, 0, i, gridSize));
+        line_indices.push_back(get_vertex_index(0, gridSize.y - 1, i, gridSize));
+    }
+
+
     GLuint ebo;
     glGenBuffers(1, &ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, line_indices.size() * sizeof(line_indices[0]), line_indices.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
@@ -244,13 +385,16 @@ int main() try
 
     bool running = true;
 
-    float cube_x = 0.7f;
-    float cube_y = 0.5f;
+    float cube_x = 0;
+    float cube_y = 0;
     float dt = 0.f;
-    float speed = 10.f;
+    float speed = 2.f;
+    float z_shift = 1.5;
 
-    float z_shift = 3;
+    float y_angle = 5.45;
+    float x_angle = -0.5;
 
+    float scale = 0.5f;
 
     while (running)
     {
@@ -286,11 +430,25 @@ int main() try
                     else if (event.key.keysym.sym == SDLK_DOWN) {
                         cube_y -= speed * dt;
                     }
-                    else if (event.key.keysym.sym == SDLK_w) {
-                        z_shift += speed * dt;
-                    }
                     else if (event.key.keysym.sym == SDLK_s) {
-                        z_shift -= speed * dt;
+//                        z_shift += speed * dt;
+                        x_angle += speed * dt;
+                    }
+                    else if (event.key.keysym.sym == SDLK_w) {
+//                        z_shift -= speed * dt;
+                        x_angle -= speed * dt;
+                    }
+                    else if (event.key.keysym.sym == SDLK_d) {
+                        y_angle -= speed * dt;
+                    }
+                    else if (event.key.keysym.sym == SDLK_a) {
+                        y_angle += speed * dt;
+                    }
+                    else if (event.key.keysym.sym == SDLK_SPACE) {
+                        scale += speed * dt;
+                    }
+                    else if (event.key.keysym.sym == SDLK_LSHIFT) {
+                        scale -= speed * dt;
                     }
                     break;
                 case SDL_KEYUP:
@@ -306,8 +464,6 @@ int main() try
         last_frame_start = now;
         time += dt;
 
-        float angle = time;
-        float scale = 0.5f;
         float near = 0.1f;
         float far = 10.0;
         float right = near * tan(M_PI / 4.f);
@@ -318,14 +474,7 @@ int main() try
 
         glClear(GL_COLOR_BUFFER_BIT);
 
-//        float view[16] =
-//                {
-//                        2 * near / (right - left), 0.f, (right + left) / (right - left), 0.f,
-//                        0.f, 2 * near / (top - bottom), (top + bottom) / (top - bottom), 0.f,
-//                        0.f, 0.f, - (far + near) / (far - near), - (2 * far * near) / (far - near),
-//                        0.f, 0.f, -1.f, 0.f,
-//                };
-
+//        Draw 3 cubes
         float view[16] =
                 {
                         2 * near / (right - left), 0.f, (right + left) / (right - left), 0.f,
@@ -334,49 +483,81 @@ int main() try
                         0.f, 0.f, -1.f, 0.f,
                 };
 
-        scale = 0.5;
-        float transform[16] =
-                {
-                        cos(angle) * scale, sin(angle) * scale, 0.f , cube_x - 1.f,
-                        -sin(angle) * scale, cos(angle) * scale, 0.f, cube_y,
-                        0.f, 0.f, 1.f * scale, -z_shift,
-                        0.f, 0.f, 0.f, 1.f,
-                };
+//        scale = 0.5;
+
+        float scale_matrix[16] = {
+                scale, 0, 0, 0,
+                0, scale, 0, 0,
+                0, 0, scale, 0,
+                0, 0, 0, 1.f
+        };
+
+        float x_rotate[16] = {
+                1.f, 0, 0, 0,
+                0, cos(x_angle), sin(x_angle), 0,
+                0, -sin(x_angle), cos(x_angle), 0,
+                0, 0, 0, 1
+        };
+
+        float y_rotate[16] = {
+                cos(y_angle), 0, sin(y_angle), 0,
+                0, 1, 0, 0,
+                -sin(y_angle), 0, cos(y_angle), 0,
+                0, 0, 0, 1
+        };
+
+        float shift_matrix[16] = {
+                1, 0, 0, cube_x,
+                0, 1, 0, cube_y,
+                0, 0, 1, -z_shift,
+                0, 0, 0, 1,
+        };
+
+        float transform[16];
+        float scale_shift[16];
+        float rotate[16];
+//        matrix_multiply(scale_matrix, x_rotate, scale_shift, 4);
+
+        matrix_multiply(shift_matrix, scale_matrix, scale_shift, 4);
+        matrix_multiply(x_rotate, y_rotate, rotate, 4);
+        matrix_multiply(scale_shift, rotate, transform, 4);
+
+//        for (int i = 0; i < 4; i ++) {
+//            for (int j = 0; j < 4; j++) {
+//                std::cout << transform[i * 4 + j] << ' ';
+//            }
+//            std::cout << '\n';
+//        }
+//        std::cout << '\n';
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
         glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform);
 
-        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
-
-        scale = 0.3;
-        float transform2[16] =
-                {
-                        1.f * scale, 0.f, 0.f,  cube_x + 0.5f,
-                        0.f, cos(angle) * scale, sin(angle) * scale, cube_y - 0.5f,
-                        0.f, -sin(angle) * scale, cos(angle)* scale,  -z_shift,
-                        0.f, 0.f, 0.f, 1.f,
-                };
+        glDrawElements(GL_LINES, line_indices.size() , GL_UNSIGNED_INT, 0);
+//
+//        scale = 0.3;
 
 
-        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform2);
-
-        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
-
-        scale = 0.1;
-        float transform3[16] =
-                {
-                        cos(angle) * scale, 0.f, sin(angle) * scale, cube_x - 1.f,
-                        0.f, 1.f * scale, 0.f, cube_y - 1.f,
-                        -sin(angle) * scale, 0.f, cos(angle) * scale, -z_shift,
-                        0.f, 0.f, 0.f, 1.f,
-                };
-
-
-        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform3);
-
-        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
-
+//
+//        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform2);
+//
+//        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
+//
+//        scale = 0.1;
+//        float transform3[16] =
+//                {
+//                        cos(angle) * scale, 0.f, sin(angle) * scale, cube_x - 1.f,
+//                        0.f, 1.f * scale, 0.f, cube_y - 1.f,
+//                        -sin(angle) * scale, 0.f, cos(angle) * scale, -z_shift,
+//                        0.f, 0.f, 0.f, 1.f,
+//                };
+//
+//
+//        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform3);
+//
+//        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
+//
 
 
         SDL_GL_SwapWindow(window);
