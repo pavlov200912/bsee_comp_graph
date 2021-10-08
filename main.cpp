@@ -134,10 +134,10 @@ void matrix_multiply(const float *a, const float *b, float *c, size_t size) {
 
 
 // [0, 1] * [0, 1] -> [0, 1]
-float function(float x, float y) {
+float function(float x, float y, float time) {
     float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
     float y_point = 6.0f * float(y) - 3.0f;
-    return (-x_point * x_point - y_point * y_point + 18) / 18;
+    return (-x_point * x_point - y_point * y_point + 18) / 18 + sinf(time);
 }
 
 float grid_coordinate_to_float(int x, int grid_size) {
@@ -191,11 +191,15 @@ float linear_interpolation(float x1, float y1, float x2, float y2, float y) {
     if (y1 < y2) {
         // (y - y1) / (y2 - y1) = (x - x1) / (x2 - x1)
         // x = (y - y1) / (y2 - y1) * (x2 - x1) + x1
-        return (y - y1) / (y2 - y1) * (x2 - x1) + x1;
+        float x = (y - y1) / (y2 - y1) * (x2 - x1) + x1;
+        assert(x1 <= x and x <= x2);
+        return x;
     } else {
         // (y - y2) / (y1 - y2) = (x2 - x) / (x2 - x1)
         // x = (y - y2) / (y1 - y2) * (x1 - x2) + x2
-        return (y - y2) / (y1 - y2) * (x1 - x2) + x2;
+        float x = (y - y2) / (y1 - y2) * (x1 - x2) + x2;
+        assert(x1 <= x and x <= x2);
+        return x;
     }
 }
 
@@ -286,9 +290,6 @@ void build_isolines(int graph_size,
         for (int i = 0; i < graph_size; i++) {
             for (int j = 0; j < graph_size; j++) {
                 if (!is_higher[j + i * graph_size]) continue;
-
-                auto point_x = grid_coordinate_to_float(j, graph_size);
-                auto point_y = grid_coordinate_to_float(i, graph_size);
                 auto point_z = function_values[i * graph_size + j];
                 if (point_z < level)
                     is_higher[j + i * graph_size] = false;
@@ -466,6 +467,7 @@ void build_isolines(int graph_size,
                     default:
                         std::cout << "Something wrong...\n";
                 }
+
             }
         }
     }
@@ -537,6 +539,14 @@ void build_grid(std::vector<vertex> &grid_vertices,
 
 }
 
+float max(float a, float b) {
+    return a > b ? a : b;
+}
+
+
+float min(float a, float b) {
+    return a > b ? b : a;
+}
 
 int main() try {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -640,7 +650,7 @@ int main() try {
         for (int j = 0; j < graph_size; j++) {
             auto point_x = grid_coordinate_to_float(j, graph_size);
             auto point_y = grid_coordinate_to_float(i, graph_size);
-            auto point_z = function(point_x, point_y);
+            auto point_z = function(point_x, point_y, 0);
             function_values.push_back(point_z);
             graph_vertices_xz.push_back(
                     {
@@ -651,8 +661,8 @@ int main() try {
             );
             graph_colors.push_back(
                     {
-                            std::uint8_t(255 * (1 - point_z)),
-                            std::uint8_t(255 * (1 - point_z)),
+                            std::uint8_t(255 * min(1.f, abs(1 - point_z))),
+                            std::uint8_t(255 * min(1.f, abs(1 - point_z))),
                             255,
                             0,
                     }
@@ -708,7 +718,7 @@ int main() try {
 
     glBufferData(GL_ARRAY_BUFFER,
                  function_values.size() * sizeof(function_values[0]),
-                 function_values.data(), GL_STATIC_DRAW);
+                 function_values.data(), GL_DYNAMIC_DRAW);
 
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(float),
@@ -751,7 +761,7 @@ int main() try {
     glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
     glBufferData(GL_ARRAY_BUFFER,
                  isolines_vertex.size() * sizeof(isolines_vertex[0]),
-                 isolines_vertex.data(), GL_STATIC_DRAW);
+                 isolines_vertex.data(), GL_DYNAMIC_DRAW);
 
     GLuint isolines_vao;
     glGenVertexArrays(1, &isolines_vao);
@@ -763,7 +773,7 @@ int main() try {
     glGenBuffers(1, &isolines_ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(),
-                 GL_STATIC_DRAW);
+                 GL_DYNAMIC_DRAW);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),
@@ -799,8 +809,11 @@ int main() try {
 
     float scale = 0.5f;
 
-    while (running) {
+    int iteration = 0;
 
+
+    while (running) {
+        iteration += 1;
         glClear(GL_DEPTH_BUFFER_BIT);
 
         for (SDL_Event event; SDL_PollEvent(&event);)
@@ -853,7 +866,6 @@ int main() try {
         auto now = std::chrono::high_resolution_clock::now();
         dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
         last_frame_start = now;
-        time += dt;
 
         float near = 0.1f;
         float far = 10.0;
@@ -908,13 +920,49 @@ int main() try {
         matrix_multiply(x_rotate, y_rotate, rotate, 4);
         matrix_multiply(scale_shift, rotate, transform, 4);
 
+//         Update function
+
+
+        time += dt;
+        function_values.clear();
+        for (int i = 0; i < graph_size; i++) {
+            for (int j = 0; j < graph_size; j++) {
+                auto point_x = grid_coordinate_to_float(j, graph_size);
+                auto point_y = grid_coordinate_to_float(i, graph_size);
+                auto point_z = function(point_x, point_y, time);
+                function_values.push_back(point_z);
+            }
+        }
+
+        isolines_vertex.clear();
+        isolines_index.clear();
+        build_isolines(graph_size, isolines_vertex, isolines_index, function_values, isolines_levels);
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_y);
+        glBufferData(
+                GL_ARRAY_BUFFER,
+                sizeof(function_values[0]) * function_values.size(),
+                function_values.data(),
+                GL_DYNAMIC_DRAW
+        );
+
+
+
+        glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
+        glBufferData(GL_ARRAY_BUFFER,
+                     isolines_vertex.size() * sizeof(isolines_vertex[0]),
+                     isolines_vertex.data(), GL_DYNAMIC_DRAW);
+
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(),
+                     GL_DYNAMIC_DRAW);
+
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
         glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform);
-//
-//
-//        scale = 0.3;
+
 
         glBindVertexArray(vao);
         glDrawElements(GL_LINES, line_indices.size(), GL_UNSIGNED_INT, 0);
