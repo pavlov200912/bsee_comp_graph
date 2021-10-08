@@ -174,10 +174,11 @@ void matrix_multiply(const float* a, const float* b, float* c, size_t size) {
 }
 
 
+// [0, 1] * [0, 1] -> [0, 1]
 float function(float x, float y) {
     float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
     float y_point = 6.0f * float(y) - 3.0f;
-    return x_point * x_point + y_point * y_point;
+    return (-x_point * x_point - y_point * y_point + 18) / 18;
 }
 
 float grid_coordinate_to_float(int x, int grid_size) {
@@ -220,6 +221,336 @@ void push_grid_vertex(int x, int y, int z, int grid_size,
     auto v = set_up_grid_vertex(x, y, z, grid_size, index, vertex_int, corners);
     index_map[vertex_int] = index;
     vertices.push_back(v);
+}
+
+float linear_interpolation(float x1, float y1, float x2, float y2, float y) {
+   if (x1 > x2) {
+       std::swap(x1, x2);
+       std::swap(y1, y2);
+   }
+   if (y1 < y2) {
+       // (y - y1) / (y2 - y1) = (x - x1) / (x2 - x1)
+       // x = (y - y1) / (y2 - y1) * (x2 - x1) + x1
+       return  (y - y1) / (y2 - y1) * (x2 - x1) + x1;
+   } else {
+       // (y - y2) / (y1 - y2) = (x2 - x) / (x2 - x1)
+       // x = (y - y2) / (y1 - y2) * (x1 - x2) + x2
+       return (y - y2) / (y1 - y2) * (x1 - x2) + x2;
+   }
+}
+
+struct pair_hash {
+        template <class T1, class T2>
+        std::size_t operator () (const std::pair<T1,T2> &p) const {
+            auto h1 = std::hash<T1>{}(p.first);
+            auto h2 = std::hash<T2>{}(p.second);
+
+            // Mainly for demonstration purposes, i.e. works but is overly simple
+            // In the real world, use sth. like boost.hash_combine
+            return h1 ^ h2;
+        }
+};
+
+enum Direction {
+    TOP,
+    LEFT,
+    RIGHT,
+    BOTTOM
+};
+
+std::pair<std::pair<int, int>, std::pair<int, int>> dir_to_ints(Direction d) {
+    switch (d) {
+        case TOP:
+            return {{0, 0}, {0, 1}};
+        case RIGHT:
+            return {{0 , 1}, {1, 1}};
+        case LEFT:
+            return {{0, 0}, {1, 0}};
+        case BOTTOM:
+            return {{1, 0}, {1, 1}};
+    }
+}
+
+int push_edge(Direction d, int i, int j, float level, int graph_size,
+               std::vector<vertex> &vertices, std::unordered_map<std::pair<int, int>, int, pair_hash> &edges_index,
+               const std::vector<std::vector<float>> &function_values) {
+    auto [edge1, edge2] = dir_to_ints(d);
+    int i1 = i + edge1.first, j1 = j + edge1.second;
+    int i2 = i + edge2.first, j2 = j + edge2.second;
+    int index = 0;
+    std::pair<int, int> edge = {i1 * graph_size + j1, i2 * graph_size + j2};
+    if (edges_index.contains(edge)) {
+        index = edges_index[edge];
+    } else {
+        vertex v1{};
+        v1.color[0] = 0;
+        v1.color[1] = 0;
+        v1.color[2] = 0;
+        v1.color[3] = 0;
+
+        auto point_x1 = grid_coordinate_to_float(j1, graph_size);
+        auto point_z1 = grid_coordinate_to_float(i1, graph_size);
+
+        auto point_x2 = grid_coordinate_to_float(j2, graph_size);
+        auto point_z2 = grid_coordinate_to_float(i2, graph_size);
+
+        v1.position = {
+                linear_interpolation(point_x1, function_values[i1][j1], point_x2, function_values[i2][j2], level),
+                level + 0.0001f,
+                linear_interpolation(point_z1, function_values[i1][j1], point_z2, function_values[i2][j2], level),
+        };
+        edges_index[edge] = int(vertices.size());
+        index = int(vertices.size());
+        vertices.push_back(v1);
+    }
+    return index;
+}
+
+void build_isolines(int graph_size,
+                    std::vector<vertex> &isolines_vertex,
+                    std::vector<std::uint32_t> &isolines_index,
+                    const std::vector<std::vector<float>> &function_values, const std::vector<float>& isolines_levels) {
+    std::unordered_map<std::pair<int, int>, int, pair_hash> edges_index;
+    std::vector<bool> is_higher(graph_size * graph_size, true);
+
+    for (auto level: isolines_levels) {
+
+        for (int i = 0; i < graph_size; i++) {
+            for (int j = 0; j < graph_size; j++) {
+                if (!is_higher[j + i * graph_size]) continue;
+
+                auto point_x = grid_coordinate_to_float(j, graph_size);
+                auto point_y = grid_coordinate_to_float(i, graph_size);
+                auto point_z = function_values[i][j];
+                if (point_z < level)
+                    is_higher[j + i * graph_size] = false;
+            }
+        }
+        edges_index.clear();
+        for (int i = 0; i < graph_size - 1; i++) {
+            for (int j = 0; j < graph_size - 1; j++) {
+                // 8 4
+                // 1 2
+                int marching_case = (is_higher[j + i * graph_size] << 3) | (is_higher[j + 1 + i * graph_size] << 2);
+                marching_case |=  (is_higher[j + (i + 1) * graph_size]) | (is_higher[j + 1 + (i + 1) * graph_size] << 1);
+
+                // For each 1 0 edge
+                // Check if there is an edges_index already
+                // If it is, find that vertex
+                // If it is not, create new vertex and push it, update edges_index
+                // Find vertices for both 1 0
+
+                switch (marching_case) {
+                    case 0:
+                        break;
+                    case 1:
+                    {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 2:
+                    {
+                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 3:
+                    {
+
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+//                        std::cout << "Connect: " << index1 << ' ' << index2 << '\n';
+                        break;
+                    }
+
+                    case 4:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+
+                    case 5:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        int index3 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index4 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index3);
+                        isolines_index.push_back(index4);
+
+                        break;
+                    }
+                    case 6:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        break;
+                    }
+                    case 7:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        break;
+                    }
+                    case 8:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        break;
+                    }
+                    case 9:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        break;
+                    }
+                    case 10:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+
+                        int index3 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index4 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index3);
+                        isolines_index.push_back(index4);
+                        break;
+                    }
+                    case 11:
+                    {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 12:
+                    {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 13:
+                    {
+                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 14:
+                    {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        isolines_index.push_back(index1);
+                        isolines_index.push_back(index2);
+                        break;
+                    }
+                    case 15:
+                    {
+                        break;
+                    }
+                    default:
+                        std::cout << "Something wrong...\n";
+                }
+            }
+        }
+    }
+
+}
+
+void build_grid(std::vector<vertex> &grid_vertices,
+                std::vector<std::uint32_t> &line_indices,
+                int grid_size) {
+
+    std::unordered_map<int, int> grid_vertex_to_index;
+    // Set of corner vertex, to color it black
+    std::set<std::uint32_t> grid_corners;
+    grid_corners.insert(grid_vertex_to_int(0, 0, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, 0, grid_size - 1, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, grid_size - 1, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, grid_size - 1, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, grid_size - 1, grid_size));
+
+
+    for (int i = 0; i < grid_size; i++) {
+        // X plane grid vertices
+        push_grid_vertex(i, 0, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(i, 0, grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        push_grid_vertex(0, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(grid_size - 1, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        // Z plane
+        push_grid_vertex(0, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, i , grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, grid_size - 1 , i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        // Y plane
+        push_grid_vertex(i, grid_size - 1 , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(grid_size - 1, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+    }
+
+    // MAIN GRID
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, grid_size - 1, grid_size)]);
+
+
+    for (int i = 0; i < grid_size; i++) {
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, grid_size - 1, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, grid_size - 1, 0, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, i, 0, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, grid_size - 1, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, i, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, i, grid_size)]);
+    }
+
+
 }
 
 int main() try
@@ -272,46 +603,10 @@ int main() try
     // Set up gridSize
     int grid_size = 10;
     // Init graph vertices
-    std::unordered_map<int, int> grid_vertex_to_index;
     std::vector<vertex> grid_vertices;
+    std::vector<std::uint32_t> line_indices;
 
-    // Set of corner vertex, to color it black
-    std::set<std::uint32_t> grid_corners;
-    grid_corners.insert(grid_vertex_to_int(0, 0, 0, grid_size));
-    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, 0, grid_size));
-    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, 0, grid_size));
-    grid_corners.insert(grid_vertex_to_int(0, 0, grid_size - 1, grid_size));
-    grid_corners.insert(grid_vertex_to_int(grid_size - 1, grid_size - 1, 0, grid_size));
-    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, grid_size - 1, grid_size));
-    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, grid_size - 1, grid_size));
-
-
-    for (int i = 0; i < grid_size; i++) {
-        // X plane grid vertices
-        push_grid_vertex(i, 0, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(i, 0, grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-
-        push_grid_vertex(0, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(grid_size - 1, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-
-        // Z plane
-        push_grid_vertex(0, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(0, i , grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(0, grid_size - 1 , i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-
-        // Y plane
-        push_grid_vertex(i, grid_size - 1 , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(grid_size - 1, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-    }
-
-//    std::cout << "Grid vertex:" << '\n';
-//    for (int i = 0; i < grid_vertices.size(); i++) {
-//        auto v = grid_vertices[i].position;
-//        auto pos = grid_vertex_to_int(int(v.x * grid_size), int(v.y * grid_size), int(v.z * grid_size), grid_size);
-//        std::cout << "Index: " << i << " Vertex: " << int(v.x * grid_size) << ' ' << int(v.y * grid_size) << ' ' << int(v.z * grid_size) << " | " <<
-//                                       pos << " | " << grid_vertex_to_index[pos] << '\n';
-//    }
-
+    build_grid(grid_vertices, line_indices, grid_size);
 
     GLuint vbo;
     glGenBuffers(1, &vbo);
@@ -328,37 +623,6 @@ int main() try
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBindVertexArray(vao);
 
-
-    std::vector<std::uint32_t> line_indices;
-
-    // MAIN GRID
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, 0, grid_size)]);
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, 0, grid_size)]);
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
-    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, grid_size - 1, grid_size)]);
-
-
-    for (int i = 0; i < grid_size; i++) {
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, grid_size - 1, grid_size)]);
-
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, grid_size - 1, 0, grid_size)]);
-
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, i, 0, grid_size)]);
-
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, grid_size - 1, grid_size)]);
-
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, i, grid_size)]);
-
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
-        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, i, grid_size)]);
-    }
 
 
     GLuint ebo;
@@ -380,11 +644,13 @@ int main() try
     std::vector<vertex> graph_vertices;
 
     int graph_size = 100;
+    std::vector<std::vector<float>> function_values(graph_size, std::vector<float>(graph_size, 0.f));
     for (int i = 0; i < graph_size; i++) {
         for (int j = 0; j < graph_size; j++) {
             auto point_x = grid_coordinate_to_float(j, graph_size);
             auto point_y = grid_coordinate_to_float(i, graph_size);
-            auto point_z = function(point_x, point_y) / 18;
+            auto point_z = function(point_x, point_y);
+            function_values[i][j] = point_z;
             graph_vertices.push_back({
                                              {
                                                      point_x,
@@ -450,6 +716,46 @@ int main() try
 
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
+
+
+    GLuint isolines_vbo;
+    glGenBuffers(1, &isolines_vbo);
+
+    std::vector<vertex> isolines_vertex;
+    std::vector<std::uint32_t> isolines_index;
+    std::vector<float> isolines_levels; // should be sorted from lower to higher
+    int isolines_size = 20;
+    for (int i = 1; i <= isolines_size; i++) {
+        isolines_levels.push_back(float(i) / float(isolines_size));
+    }
+
+
+    build_isolines(graph_size, isolines_vertex, isolines_index, function_values, isolines_levels);
+
+
+    glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 isolines_vertex.size() * sizeof(isolines_vertex[0]),
+                 isolines_vertex.data(), GL_STATIC_DRAW);
+
+    GLuint isolines_vao;
+    glGenVertexArrays(1, &isolines_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
+    glBindVertexArray(isolines_vao);
+
+
+    GLuint isolines_ebo;
+    glGenBuffers(1, &isolines_ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
+
+
 
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
@@ -609,6 +915,9 @@ int main() try
         glBindVertexArray(graph_vao);
         glDrawElements(GL_TRIANGLES, graph_triangles.size() , GL_UNSIGNED_INT, 0);
 
+
+        glBindVertexArray(isolines_vao);
+        glDrawElements(GL_LINES, isolines_index.size() , GL_UNSIGNED_INT, 0);
 
 
 
