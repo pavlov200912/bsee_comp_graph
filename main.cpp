@@ -174,24 +174,12 @@ void matrix_multiply(const float* a, const float* b, float* c, size_t size) {
 }
 
 
-//float function(int x, int y, GridSize size) {
-//    float x_point = // TODO: [0, GridSize.x] -> [-3, 3];
-//    float y_point = ;
-//    return // TODO: Function f(x, y)
-//}
+float function(float x, float y) {
+    float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
+    float y_point = 6.0f * float(y) - 3.0f;
+    return x_point * x_point + y_point * y_point;
+}
 
-//std::uint32_t get_vertex_index(int x, int y, int z, GridSize size) {
-//    // [0..a]x[0..b]x[0..c] --> [0..a*b*c]
-//    return x + size.x * (z + size.y * y);
-//}
-//
-//std::tuple<int, int, int> index_to_vertex(int index, GridSize size) {
-//    int y = index / (size.x * size.y);
-//    int z = (index / (size.x)) % size.x;
-//    int x = index % size.x;
-//    return {x, y, z};
-//}
-//
 float grid_coordinate_to_float(int x, int grid_size) {
     return (float)x / grid_size;
 }
@@ -351,7 +339,6 @@ int main() try
     line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
     line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, grid_size - 1, grid_size)]);
 
-    // X grid
 
     for (int i = 0; i < grid_size; i++) {
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
@@ -362,7 +349,7 @@ int main() try
 
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, i, 0, grid_size)]);
-//
+
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, grid_size - 1, grid_size)]);
 
@@ -372,6 +359,7 @@ int main() try
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, i, grid_size)]);
     }
+
 
     GLuint ebo;
     glGenBuffers(1, &ebo);
@@ -385,6 +373,84 @@ int main() try
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
 
 
+    GLuint graph_vbo;
+    glGenBuffers(1, &graph_vbo);
+
+    // todo: init graph_vertices
+    std::vector<vertex> graph_vertices;
+
+    int graph_size = 100;
+    for (int i = 0; i < graph_size; i++) {
+        for (int j = 0; j < graph_size; j++) {
+            auto point_x = grid_coordinate_to_float(j, graph_size);
+            auto point_y = grid_coordinate_to_float(i, graph_size);
+            auto point_z = function(point_x, point_y) / 18;
+            graph_vertices.push_back({
+                                             {
+                                                     point_x,
+                                                     point_z,
+                                                     point_y,
+                                             },
+                                             {
+                                                     std::uint8_t(255 * (1 - point_z)),
+                                                     std::uint8_t(255 * (1 - point_z)),
+                                                     255,
+                                                     0,
+                                             }
+                                     });
+//            std::cout << "(i, j) "  << i << ' ' << j << " (x, y, f) " << point_x << ' ' << point_y << ' ' << point_z << '\n';
+        }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, graph_vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 graph_vertices.size() * sizeof(graph_vertices[0]),
+                 graph_vertices.data(), GL_STATIC_DRAW);
+
+    GLuint graph_vao;
+    glGenVertexArrays(1, &graph_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, graph_vbo);
+    glBindVertexArray(graph_vao);
+
+    // todo: init graph triangles
+    std::vector<std::uint32_t> graph_triangles;
+    for (int i = 0; i < graph_size - 1; i++) {
+        for (int j = 0; j < graph_size - 1; j++) {
+            graph_triangles.push_back(i * graph_size + j);
+            graph_triangles.push_back(i * graph_size + graph_size + j);
+            graph_triangles.push_back(i * graph_size + j + 1);
+//            std::cout << "Triangle: A " << graph_vertices[i * graph_size + j].position.x * graph_size<< ' ' <<
+//                                         graph_vertices[i * graph_size + j].position.z * graph_size<< ' ' <<
+//                                         graph_vertices[i * graph_size + j].position.y * 18<< ' ';
+//
+//            std::cout << " B " << graph_vertices[i * graph_size + j + 1].position.x * graph_size<< ' ' <<
+//                      graph_vertices[i * graph_size + j + 1].position.z * graph_size << ' ' <<
+//                      graph_vertices[i * graph_size + j + 1].position.y * 18 << ' ';
+//            std::cout << " C " << graph_vertices[i * graph_size + j + graph_size].position.x * graph_size<< ' ' <<
+//                      graph_vertices[i * graph_size + j + graph_size].position.z * graph_size<< ' ' <<
+//                      graph_vertices[i * graph_size + j + graph_size].position.y * 18 << ' ';
+//            std::cout << '\n';
+
+            graph_triangles.push_back(i * graph_size + j + 1);
+            graph_triangles.push_back(i * graph_size + graph_size + j);
+            graph_triangles.push_back(i * graph_size + graph_size + j + 1);
+        }
+    }
+
+
+
+
+    GLuint graph_ebo;
+    glGenBuffers(1, &graph_ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, graph_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, graph_triangles.size() * sizeof(graph_triangles[0]), graph_triangles.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
+
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -393,8 +459,6 @@ int main() try
     std::map<SDL_Keycode, bool> button_down;
 
     glEnable(GL_DEPTH_TEST);
-//    glEnable(GL_CULL_FACE);
-//    glCullFace(GL_FRONT);
 
     bool running = true;
 
@@ -487,7 +551,6 @@ int main() try
 
         glClear(GL_COLOR_BUFFER_BIT);
 
-//        Draw 3 cubes
         float view[16] =
                 {
                         2 * near / (right - left), 0.f, (right + left) / (right - left), 0.f,
@@ -495,8 +558,6 @@ int main() try
                         0.f, 0.f, - (far + near) / (far - near), - (2 * far * near) / (far - near),
                         0.f, 0.f, -1.f, 0.f,
                 };
-
-//        scale = 0.5;
 
         float scale_matrix[16] = {
                 scale, 0, 0, 0,
@@ -529,48 +590,26 @@ int main() try
         float transform[16];
         float scale_shift[16];
         float rotate[16];
-//        matrix_multiply(scale_matrix, x_rotate, scale_shift, 4);
-
         matrix_multiply(shift_matrix, scale_matrix, scale_shift, 4);
         matrix_multiply(x_rotate, y_rotate, rotate, 4);
         matrix_multiply(scale_shift, rotate, transform, 4);
 
-//        for (int i = 0; i < 4; i ++) {
-//            for (int j = 0; j < 4; j++) {
-//                std::cout << transform[i * 4 + j] << ' ';
-//            }
-//            std::cout << '\n';
-//        }
-//        std::cout << '\n';
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
         glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform);
 //
-        glDrawElements(GL_LINES, line_indices.size() , GL_UNSIGNED_INT, 0);
 //
 //        scale = 0.3;
 
+        glBindVertexArray(vao);
+        glDrawElements(GL_LINES, line_indices.size() , GL_UNSIGNED_INT, 0);
 
-//
-//        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform2);
-//
-//        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
-//
-//        scale = 0.1;
-//        float transform3[16] =
-//                {
-//                        cos(angle) * scale, 0.f, sin(angle) * scale, cube_x - 1.f,
-//                        0.f, 1.f * scale, 0.f, cube_y - 1.f,
-//                        -sin(angle) * scale, 0.f, cos(angle) * scale, -z_shift,
-//                        0.f, 0.f, 0.f, 1.f,
-//                };
-//
-//
-//        glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform3);
-//
-//        glDrawElements(GL_TRIANGLES, std::size(cube_indices) , GL_UNSIGNED_INT, 0);
-//
+
+        glBindVertexArray(graph_vao);
+        glDrawElements(GL_TRIANGLES, graph_triangles.size() , GL_UNSIGNED_INT, 0);
+
+
 
 
         SDL_GL_SwapWindow(window);
