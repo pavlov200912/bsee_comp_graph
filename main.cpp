@@ -14,6 +14,7 @@
 #include <chrono>
 #include <vector>
 #include <map>
+#include <unordered_map>
 
 std::string to_string(std::string_view str)
 {
@@ -172,11 +173,6 @@ void matrix_multiply(const float* a, const float* b, float* c, size_t size) {
     }
 }
 
-struct GridSize {
-    int x;
-    int y;
-    int z;
-};
 
 //float function(int x, int y, GridSize size) {
 //    float x_point = // TODO: [0, GridSize.x] -> [-3, 3];
@@ -184,20 +180,58 @@ struct GridSize {
 //    return // TODO: Function f(x, y)
 //}
 
-std::uint32_t get_vertex_index(int x, int y, int z, GridSize size) {
-    // [0..a]x[0..b]x[0..c] --> [0..a*b*c]
-    return x + size.x * (z + size.y * y);
+//std::uint32_t get_vertex_index(int x, int y, int z, GridSize size) {
+//    // [0..a]x[0..b]x[0..c] --> [0..a*b*c]
+//    return x + size.x * (z + size.y * y);
+//}
+//
+//std::tuple<int, int, int> index_to_vertex(int index, GridSize size) {
+//    int y = index / (size.x * size.y);
+//    int z = (index / (size.x)) % size.x;
+//    int x = index % size.x;
+//    return {x, y, z};
+//}
+//
+float grid_coordinate_to_float(int x, int grid_size) {
+    return (float)x / grid_size;
 }
 
-std::tuple<int, int, int> index_to_vertex(int index, GridSize size) {
-    int y = index / (size.x * size.y);
-    int z = (index / (size.x)) % size.x;
-    int x = index % size.x;
+int grid_vertex_to_int(int x, int y, int z, int grid_size) {
+    return x + grid_size * (z + grid_size * y);
+}
+
+std::tuple<int, int, int> int_to_grid_vertex(int index, int grid_size) {
+    int y = index / (grid_size * grid_size);
+    int z = (index / grid_size) % grid_size;
+    int x = index % grid_size;
     return {x, y, z};
 }
 
-float grid_index_to_float(int x, GridSize gridSize) {
-    return (float)x / gridSize.x;
+vertex set_up_grid_vertex(int x, int y, int z, int grid_size, int index, int vertex_int,
+                        const std::set<std::uint32_t> &grid_corners) {
+
+    vertex new_vertex = {{
+                                 grid_coordinate_to_float(x, grid_size),
+                                 grid_coordinate_to_float(y, grid_size),
+                                   grid_coordinate_to_float(z, grid_size)},
+                         {50, 100, 100, 0}};
+    if (grid_corners.contains(vertex_int)) {
+        new_vertex.color[0] = 0;
+        new_vertex.color[1] = 0;
+        new_vertex.color[2] = 0;
+        new_vertex.color[3] = 0;
+    }
+    return new_vertex;
+}
+
+void push_grid_vertex(int x, int y, int z, int grid_size,
+                      std::vector<vertex> &vertices, std::unordered_map<int, int> &index_map,
+                      const std::set<std::uint32_t> &corners) {
+    int index = vertices.size();
+    int vertex_int = grid_vertex_to_int(x, y, z, grid_size);
+    auto v = set_up_grid_vertex(x, y, z, grid_size, index, vertex_int, corners);
+    index_map[vertex_int] = index;
+    vertices.push_back(v);
 }
 
 int main() try
@@ -247,63 +281,58 @@ int main() try
     GLuint view_location = glGetUniformLocation(program, "view");
     GLuint transform_location = glGetUniformLocation(program, "transform");
 
+    // Set up gridSize
+    int grid_size = 10;
     // Init graph vertices
+    std::unordered_map<int, int> grid_vertex_to_index;
+    std::vector<vertex> grid_vertices;
 
-    // Should be the same size, really
-    int A = 20, B = 20, C = 20;
-    GridSize gridSize{A, B, C};
-    vertex graph_vertices[A * B * C];
-//    {
-//        // ground
-//        {{0, 0, 0}, {0, 255, 255, 255}},
-//        // only x
-//        {{1, 0, 0}, {0, 0, 255, 255}},
-//        // only y
-//        {{0, 1, 0}, {0, 0, 0, 0}},
-//        // only z
-//        {{0, 0, 1}, {0, 255, 255, 0}},
-//        // x and y
-//        {{1, 1, 0}, {0, 255, 255, 255}},
-//        // y and z
-//        {{0, 1, 1}, {0, 255, 255, 255}},
-//        // x and z
-//        {{1, 0, 1}, {0, 255, 255, 255}}
-//    };
-
-
-
+    // Set of corner vertex, to color it black
     std::set<std::uint32_t> grid_corners;
-    grid_corners.insert(get_vertex_index(0, 0, 0, gridSize));
-    grid_corners.insert(get_vertex_index(gridSize.x - 1, 0, 0, gridSize));
-    grid_corners.insert(get_vertex_index(0, gridSize.y - 1, 0, gridSize));
-    grid_corners.insert(get_vertex_index(0, 0, gridSize.z - 1, gridSize));
-    grid_corners.insert(get_vertex_index(gridSize.x - 1, gridSize.y - 1, 0, gridSize));
-    grid_corners.insert(get_vertex_index(0, gridSize.y - 1, gridSize.z - 1, gridSize));
-    grid_corners.insert(get_vertex_index(gridSize.x - 1, 0, gridSize.z - 1, gridSize));
+    grid_corners.insert(grid_vertex_to_int(0, 0, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, 0, grid_size - 1, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, grid_size - 1, 0, grid_size));
+    grid_corners.insert(grid_vertex_to_int(0, grid_size - 1, grid_size - 1, grid_size));
+    grid_corners.insert(grid_vertex_to_int(grid_size - 1, 0, grid_size - 1, grid_size));
 
-    for (int index = 0; index < A * B * C; index ++) {
-        auto [i, j, k] = index_to_vertex(index, gridSize);
 
-        if (grid_corners.contains(index)) {
-            // black
-            graph_vertices[index] = {{grid_index_to_float(i, gridSize), grid_index_to_float(j, gridSize), grid_index_to_float(k, gridSize)},
-                                     {0, 0, 0, 0}};
-        } else {
-            // gray
-            graph_vertices[index] = {{grid_index_to_float(i, gridSize), grid_index_to_float(j, gridSize), grid_index_to_float(k, gridSize)},
-                                     {50, 100, 100, 0}};
-        }
-        std::cout << "Index " << index << ' ' << "Vertex: " << i << ' ' << j << ' ' << k << '\n';
-        assert(get_vertex_index(i, j, k, gridSize) == index);
+    for (int i = 0; i < grid_size; i++) {
+        // X plane grid vertices
+        push_grid_vertex(i, 0, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(i, 0, grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        push_grid_vertex(0, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(grid_size - 1, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        // Z plane
+        push_grid_vertex(0, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, i , grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, grid_size - 1 , i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+
+        // Y plane
+        push_grid_vertex(i, grid_size - 1 , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(grid_size - 1, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
     }
+
+//    std::cout << "Grid vertex:" << '\n';
+//    for (int i = 0; i < grid_vertices.size(); i++) {
+//        auto v = grid_vertices[i].position;
+//        auto pos = grid_vertex_to_int(int(v.x * grid_size), int(v.y * grid_size), int(v.z * grid_size), grid_size);
+//        std::cout << "Index: " << i << " Vertex: " << int(v.x * grid_size) << ' ' << int(v.y * grid_size) << ' ' << int(v.z * grid_size) << " | " <<
+//                                       pos << " | " << grid_vertex_to_index[pos] << '\n';
+//    }
+
 
     GLuint vbo;
     glGenBuffers(1, &vbo);
 
+
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER,
-                 sizeof(graph_vertices),
-                 graph_vertices, GL_STATIC_DRAW);
+                 grid_vertices.size() * sizeof(grid_vertices[0]),
+                 grid_vertices.data(), GL_STATIC_DRAW);
 
     GLuint vao;
 
@@ -315,50 +344,36 @@ int main() try
     std::vector<std::uint32_t> line_indices;
 
     // MAIN GRID
-    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
-    line_indices.push_back(get_vertex_index(gridSize.x - 1, 0, 0, gridSize));
-    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
-    line_indices.push_back(get_vertex_index(0, gridSize.y - 1, 0, gridSize));
-    line_indices.push_back(get_vertex_index(0, 0, 0, gridSize));
-    line_indices.push_back(get_vertex_index(0, 0, gridSize.z - 1, gridSize));
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, 0, grid_size)]);
+    line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, grid_size - 1, grid_size)]);
 
-    for(auto &x: line_indices) {
-        std::cout << x << ' ';
+    // X grid
+
+    for (int i = 0; i < grid_size; i++) {
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, grid_size - 1, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, grid_size - 1, 0, grid_size)]);
+
+        std::cout << grid_vertex_to_int(0, i, 0, grid_size) << '\n';
+        std::cout << grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)] << '\n';
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, i, 0, grid_size)]);
+//
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, grid_size - 1, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, 0, i, grid_size)]);
+
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, 0, i, grid_size)]);
+        line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, i, grid_size)]);
     }
-
-//    // X grid
-
-    int draw_grid_freq = 5;
-
-    for (int i = 0; i < gridSize.x; i++) {
-        if (i % draw_grid_freq != 0 && i != gridSize.x - 1) continue;
-        line_indices.push_back(get_vertex_index(i, 0, 0, gridSize));
-        line_indices.push_back(get_vertex_index(i, 0, gridSize.z - 1, gridSize));
-
-        line_indices.push_back(get_vertex_index(i, 0, 0, gridSize));
-        line_indices.push_back(get_vertex_index(i, gridSize.y - 1, 0, gridSize));
-    }
-
-    //  Y grid
-    for (int i = 0; i < gridSize.y; i++) {
-        if (i % draw_grid_freq != 0 && i != gridSize.y - 1) continue;
-        line_indices.push_back(get_vertex_index(0, i, 0, gridSize));
-        line_indices.push_back(get_vertex_index(gridSize.x - 1, i, 0, gridSize));
-
-        line_indices.push_back(get_vertex_index(0, i, 0, gridSize));
-        line_indices.push_back(get_vertex_index(0, i, gridSize.z - 1, gridSize));
-    }
-
-    // Z grid
-    for (int i = 0; i < gridSize.z; i++) {
-        if (i % draw_grid_freq != 0 && i != gridSize.z - 1) continue;
-        line_indices.push_back(get_vertex_index(0, 0, i, gridSize));
-        line_indices.push_back(get_vertex_index(gridSize.x - 1, 0, i, gridSize));
-
-        line_indices.push_back(get_vertex_index(0, 0, i, gridSize));
-        line_indices.push_back(get_vertex_index(0, gridSize.y - 1, i, gridSize));
-    }
-
 
     GLuint ebo;
     glGenBuffers(1, &ebo);
@@ -533,7 +548,7 @@ int main() try
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
         glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform);
-
+//
         glDrawElements(GL_LINES, line_indices.size() , GL_UNSIGNED_INT, 0);
 //
 //        scale = 0.3;
