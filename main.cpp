@@ -134,6 +134,18 @@ void matrix_multiply(const float *a, const float *b, float *c, size_t size) {
 
 
 // [0, 1] * [0, 1] -> [0, 1]
+
+float metaballs(float x, float y, float time, const std::vector<vec3>& circles, const std::vector<float>& weights) {
+    float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
+    float y_point = 6.0f * float(y) - 3.0f;
+    float result = 0.f;
+    assert(circles.size() == weights.size());
+    for (int i = 0; i < circles.size(); i++) {
+        result += weights[i] * exp(- (pow(x_point - circles[i].x, 2) + pow(y_point - circles[i].y, 2)) / pow(circles[i].z, 2));
+    }
+    return result / 2 + 0.5;
+}
+
 float function(float x, float y, float time) {
     float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
     float y_point = 6.0f * float(y) - 3.0f;
@@ -650,7 +662,7 @@ int main() try {
         for (int j = 0; j < graph_size; j++) {
             auto point_x = grid_coordinate_to_float(j, graph_size);
             auto point_y = grid_coordinate_to_float(i, graph_size);
-            auto point_z = function(point_x, point_y, 0);
+            auto point_z = metaballs(point_x, point_y, 0, {{0, 0, 0.25}}, {1});
             function_values.push_back(point_z);
             graph_vertices_xz.push_back(
                     {
@@ -866,6 +878,7 @@ int main() try {
         auto now = std::chrono::high_resolution_clock::now();
         dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
         last_frame_start = now;
+        time += dt;
 
         float near = 0.1f;
         float far = 10.0;
@@ -920,44 +933,53 @@ int main() try {
         matrix_multiply(x_rotate, y_rotate, rotate, 4);
         matrix_multiply(scale_shift, rotate, transform, 4);
 
-//         Update function
+        //         Update function
 
-
-        time += dt;
-        function_values.clear();
-        for (int i = 0; i < graph_size; i++) {
-            for (int j = 0; j < graph_size; j++) {
-                auto point_x = grid_coordinate_to_float(j, graph_size);
-                auto point_y = grid_coordinate_to_float(i, graph_size);
-                auto point_z = function(point_x, point_y, time);
-                function_values.push_back(point_z);
+        std::vector<vec3> circles = {{3 * sinf(time), 3 * cosf(time) * sinf(time), 1}};
+        std::vector<float> weigths = {1};
+        {
+            function_values.clear();
+            for (int i = 0; i < graph_size; i++) {
+                for (int j = 0; j < graph_size; j++) {
+                    auto point_x = grid_coordinate_to_float(j, graph_size);
+                    auto point_y = grid_coordinate_to_float(i, graph_size);
+                    auto point_z = metaballs(point_x, point_y, time, circles, weigths);
+                    function_values.push_back(point_z);
+                }
             }
         }
 
-        isolines_vertex.clear();
-        isolines_index.clear();
-        build_isolines(graph_size, isolines_vertex, isolines_index, function_values, isolines_levels);
+        // update isolines
+        {
+            isolines_vertex.clear();
+            isolines_index.clear();
+            build_isolines(graph_size, isolines_vertex, isolines_index, function_values, isolines_levels);
+        }
 
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_y);
-        glBufferData(
-                GL_ARRAY_BUFFER,
-                sizeof(function_values[0]) * function_values.size(),
-                function_values.data(),
-                GL_DYNAMIC_DRAW
-        );
+        // load function
+        {
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_y);
+            glBufferData(
+                    GL_ARRAY_BUFFER,
+                    sizeof(function_values[0]) * function_values.size(),
+                    function_values.data(),
+                    GL_DYNAMIC_DRAW
+            );
+        }
+
+        // load isolines
+        {
+            glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
+            glBufferData(GL_ARRAY_BUFFER,
+                         isolines_vertex.size() * sizeof(isolines_vertex[0]),
+                         isolines_vertex.data(), GL_DYNAMIC_DRAW);
 
 
-
-        glBindBuffer(GL_ARRAY_BUFFER, isolines_vbo);
-        glBufferData(GL_ARRAY_BUFFER,
-                     isolines_vertex.size() * sizeof(isolines_vertex[0]),
-                     isolines_vertex.data(), GL_DYNAMIC_DRAW);
-
-
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(),
-                     GL_DYNAMIC_DRAW);
-
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]),
+                         isolines_index.data(),
+                         GL_DYNAMIC_DRAW);
+        }
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
