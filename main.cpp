@@ -2,7 +2,9 @@
 #include <SDL.h>
 #undef main
 #else
+
 #include <SDL2/SDL.h>
+
 #endif
 
 #include <GL/glew.h>
@@ -16,18 +18,15 @@
 #include <map>
 #include <unordered_map>
 
-std::string to_string(std::string_view str)
-{
+std::string to_string(std::string_view str) {
     return std::string(str.begin(), str.end());
 }
 
-void sdl2_fail(std::string_view message)
-{
+void sdl2_fail(std::string_view message) {
     throw std::runtime_error(to_string(message) + SDL_GetError());
 }
 
-void glew_fail(std::string_view message, GLenum error)
-{
+void glew_fail(std::string_view message, GLenum error) {
     throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
 }
 
@@ -35,12 +34,14 @@ const char vertex_shader_source[] =
         R"(#version 330 core
 uniform mat4 view;
 uniform mat4 transform;
-layout (location = 0) in vec3 in_position;
+layout (location = 0) in vec2 in_position_xz;
 layout (location = 1) in vec4 in_color;
+layout (location = 2) in float in_position_y;
+
 out vec4 color;
 void main()
 {
-	gl_Position = view * transform * vec4(in_position, 1.0);
+	gl_Position = view * transform * vec4(in_position_xz[0], in_position_y, in_position_xz[1], 1.0);
 	color = in_color;
 }
 )";
@@ -55,15 +56,13 @@ void main()
 }
 )";
 
-GLuint create_shader(GLenum type, const char * source)
-{
+GLuint create_shader(GLenum type, const char *source) {
     GLuint result = glCreateShader(type);
     glShaderSource(result, 1, &source, nullptr);
     glCompileShader(result);
     GLint status;
     glGetShaderiv(result, GL_COMPILE_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetShaderiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -73,8 +72,7 @@ GLuint create_shader(GLenum type, const char * source)
     return result;
 }
 
-GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
-{
+GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
     GLuint result = glCreateProgram();
     glAttachShader(result, vertex_shader);
     glAttachShader(result, fragment_shader);
@@ -82,8 +80,7 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
 
     GLint status;
     glGetProgramiv(result, GL_LINK_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetProgramiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -94,74 +91,36 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
     return result;
 }
 
-struct vec3
-{
+struct vec3 {
     float x;
     float y;
     float z;
 };
 
-struct vertex
-{
-    vec3 position;
+struct rgba {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
+};
+
+
+struct vec2 {
+    float x;
+    float y;
+};
+
+struct vertex {
+    vec2 position_xz;
+    float position_y;
     std::uint8_t color[4];
 };
 
 
-static vertex cube_vertices[]
-        {
-                // -X
-                {{-1.f, -1.f, -1.f}, {  0, 255, 255, 255}},
-                {{-1.f, -1.f,  1.f}, {  0, 255, 255, 255}},
-                {{-1.f,  1.f, -1.f}, {  0, 255, 255, 255}},
-                {{-1.f,  1.f,  1.f}, {  0, 255, 255, 255}},
-                // +X
-                {{ 1.f, -1.f,  1.f}, {255,   0,   0, 255}},
-                {{ 1.f, -1.f, -1.f}, {255,   0,   0, 255}},
-                {{ 1.f,  1.f,  1.f}, {255,   0,   0, 255}},
-                {{ 1.f,  1.f, -1.f}, {255,   0,   0, 255}},
-                // -Y
-                {{-1.f, -1.f, -1.f}, {255,   0, 255, 255}},
-                {{ 1.f, -1.f, -1.f}, {255,   0, 255, 255}},
-                {{-1.f, -1.f,  1.f}, {255,   0, 255, 255}},
-                {{ 1.f, -1.f,  1.f}, {255,   0, 255, 255}},
-                // +Y
-                {{-1.f,  1.f,  1.f}, {  0, 255,   0, 255}},
-                {{ 1.f,  1.f,  1.f}, {  0, 255,   0, 255}},
-                {{-1.f,  1.f, -1.f}, {  0, 255,   0, 255}},
-                {{ 1.f,  1.f, -1.f}, {  0, 255,   0, 255}},
-                // -Z
-                {{ 1.f, -1.f, -1.f}, {255, 255,   0, 255}},
-                {{-1.f, -1.f, -1.f}, {255, 255,   0, 255}},
-                {{ 1.f,  1.f, -1.f}, {255, 255,   0, 255}},
-                {{-1.f,  1.f, -1.f}, {255, 255,   0, 255}},
-                // +Z
-                {{-1.f, -1.f,  1.f}, {  0,   0, 255, 255}},
-                {{ 1.f, -1.f,  1.f}, {  0,   0, 255, 255}},
-                {{-1.f,  1.f,  1.f}, {  0,   0, 255, 255}},
-                {{ 1.f,  1.f,  1.f}, {  0,   0, 255, 255}},
-        };
-
-static std::uint32_t cube_indices[]
-        {
-                // -X
-                0, 1, 2, 2, 1, 3,
-                // +X
-                4, 5, 6, 6, 5, 7,
-                // -Y
-                8, 9, 10, 10, 9, 11,
-                // +Y
-                12, 13, 14, 14, 13, 15,
-                // -Z
-                16, 17, 18, 18, 17, 19,
-                // +Z
-                20, 21, 22, 22, 21, 23,
-        };
-
 // Square matrix multiplication
-void matrix_multiply(const float* a, const float* b, float* c, size_t size) {
+void matrix_multiply(const float *a, const float *b, float *c, size_t size) {
     std::fill(c, c + size * size, 0);
-    for (int i = 0; i < size; i ++) {
+    for (int i = 0; i < size; i++) {
         for (int j = 0; j < size; j++) {
             for (int k = 0; k < size; k++) {
                 // c[i, j] = a[i, k] * b[k, j]
@@ -182,7 +141,7 @@ float function(float x, float y) {
 }
 
 float grid_coordinate_to_float(int x, int grid_size) {
-    return (float)x / grid_size;
+    return (float) x / grid_size;
 }
 
 int grid_vertex_to_int(int x, int y, int z, int grid_size) {
@@ -197,12 +156,13 @@ std::tuple<int, int, int> int_to_grid_vertex(int index, int grid_size) {
 }
 
 vertex set_up_grid_vertex(int x, int y, int z, int grid_size, int index, int vertex_int,
-                        const std::set<std::uint32_t> &grid_corners) {
+                          const std::set<std::uint32_t> &grid_corners) {
 
     vertex new_vertex = {{
                                  grid_coordinate_to_float(x, grid_size),
-                                 grid_coordinate_to_float(y, grid_size),
-                                   grid_coordinate_to_float(z, grid_size)},
+                                 grid_coordinate_to_float(z, grid_size),
+                         },
+                         grid_coordinate_to_float(y, grid_size),
                          {50, 100, 100, 0}};
     if (grid_corners.contains(vertex_int)) {
         new_vertex.color[0] = 0;
@@ -224,31 +184,31 @@ void push_grid_vertex(int x, int y, int z, int grid_size,
 }
 
 float linear_interpolation(float x1, float y1, float x2, float y2, float y) {
-   if (x1 > x2) {
-       std::swap(x1, x2);
-       std::swap(y1, y2);
-   }
-   if (y1 < y2) {
-       // (y - y1) / (y2 - y1) = (x - x1) / (x2 - x1)
-       // x = (y - y1) / (y2 - y1) * (x2 - x1) + x1
-       return  (y - y1) / (y2 - y1) * (x2 - x1) + x1;
-   } else {
-       // (y - y2) / (y1 - y2) = (x2 - x) / (x2 - x1)
-       // x = (y - y2) / (y1 - y2) * (x1 - x2) + x2
-       return (y - y2) / (y1 - y2) * (x1 - x2) + x2;
-   }
+    if (x1 > x2) {
+        std::swap(x1, x2);
+        std::swap(y1, y2);
+    }
+    if (y1 < y2) {
+        // (y - y1) / (y2 - y1) = (x - x1) / (x2 - x1)
+        // x = (y - y1) / (y2 - y1) * (x2 - x1) + x1
+        return (y - y1) / (y2 - y1) * (x2 - x1) + x1;
+    } else {
+        // (y - y2) / (y1 - y2) = (x2 - x) / (x2 - x1)
+        // x = (y - y2) / (y1 - y2) * (x1 - x2) + x2
+        return (y - y2) / (y1 - y2) * (x1 - x2) + x2;
+    }
 }
 
 struct pair_hash {
-        template <class T1, class T2>
-        std::size_t operator () (const std::pair<T1,T2> &p) const {
-            auto h1 = std::hash<T1>{}(p.first);
-            auto h2 = std::hash<T2>{}(p.second);
+    template<class T1, class T2>
+    std::size_t operator()(const std::pair<T1, T2> &p) const {
+        auto h1 = std::hash<T1>{}(p.first);
+        auto h2 = std::hash<T2>{}(p.second);
 
-            // Mainly for demonstration purposes, i.e. works but is overly simple
-            // In the real world, use sth. like boost.hash_combine
-            return h1 ^ h2;
-        }
+        // Mainly for demonstration purposes, i.e. works but is overly simple
+        // In the real world, use sth. like boost.hash_combine
+        return h1 ^ h2;
+    }
 };
 
 enum Direction {
@@ -258,23 +218,28 @@ enum Direction {
     BOTTOM
 };
 
+
 std::pair<std::pair<int, int>, std::pair<int, int>> dir_to_ints(Direction d) {
     switch (d) {
         case TOP:
-            return {{0, 0}, {0, 1}};
+            return {{0, 0},
+                    {0, 1}};
         case RIGHT:
-            return {{0 , 1}, {1, 1}};
+            return {{0, 1},
+                    {1, 1}};
         case LEFT:
-            return {{0, 0}, {1, 0}};
+            return {{0, 0},
+                    {1, 0}};
         case BOTTOM:
-            return {{1, 0}, {1, 1}};
+            return {{1, 0},
+                    {1, 1}};
     }
 }
 
 int push_edge(Direction d, int i, int j, float level, int graph_size,
-               std::vector<vertex> &vertices, std::unordered_map<std::pair<int, int>, int, pair_hash> &edges_index,
-               const std::vector<std::vector<float>> &function_values) {
-    auto [edge1, edge2] = dir_to_ints(d);
+              std::vector<vertex> &vertices, std::unordered_map<std::pair<int, int>, int, pair_hash> &edges_index,
+              const std::vector<float> &function_values) {
+    auto[edge1, edge2] = dir_to_ints(d);
     int i1 = i + edge1.first, j1 = j + edge1.second;
     int i2 = i + edge2.first, j2 = j + edge2.second;
     int index = 0;
@@ -294,11 +259,14 @@ int push_edge(Direction d, int i, int j, float level, int graph_size,
         auto point_x2 = grid_coordinate_to_float(j2, graph_size);
         auto point_z2 = grid_coordinate_to_float(i2, graph_size);
 
-        v1.position = {
-                linear_interpolation(point_x1, function_values[i1][j1], point_x2, function_values[i2][j2], level),
-                level + 0.0001f,
-                linear_interpolation(point_z1, function_values[i1][j1], point_z2, function_values[i2][j2], level),
+        v1.position_xz = {
+                linear_interpolation(point_x1, function_values[i1 * graph_size + j1], point_x2,
+                                     function_values[i2 * graph_size + j2], level),
+                linear_interpolation(point_z1, function_values[i1 * graph_size + j1], point_z2,
+                                     function_values[i2 * graph_size + j2], level),
         };
+        v1.position_y = level + 0.001f;
+
         edges_index[edge] = int(vertices.size());
         index = int(vertices.size());
         vertices.push_back(v1);
@@ -309,7 +277,7 @@ int push_edge(Direction d, int i, int j, float level, int graph_size,
 void build_isolines(int graph_size,
                     std::vector<vertex> &isolines_vertex,
                     std::vector<std::uint32_t> &isolines_index,
-                    const std::vector<std::vector<float>> &function_values, const std::vector<float>& isolines_levels) {
+                    const std::vector<float> &function_values, const std::vector<float> &isolines_levels) {
     std::unordered_map<std::pair<int, int>, int, pair_hash> edges_index;
     std::vector<bool> is_higher(graph_size * graph_size, true);
 
@@ -321,7 +289,7 @@ void build_isolines(int graph_size,
 
                 auto point_x = grid_coordinate_to_float(j, graph_size);
                 auto point_y = grid_coordinate_to_float(i, graph_size);
-                auto point_z = function_values[i][j];
+                auto point_z = function_values[i * graph_size + j];
                 if (point_z < level)
                     is_higher[j + i * graph_size] = false;
             }
@@ -332,7 +300,7 @@ void build_isolines(int graph_size,
                 // 8 4
                 // 1 2
                 int marching_case = (is_higher[j + i * graph_size] << 3) | (is_higher[j + 1 + i * graph_size] << 2);
-                marching_case |=  (is_higher[j + (i + 1) * graph_size]) | (is_higher[j + 1 + (i + 1) * graph_size] << 1);
+                marching_case |= (is_higher[j + (i + 1) * graph_size]) | (is_higher[j + 1 + (i + 1) * graph_size] << 1);
 
                 // For each 1 0 edge
                 // Check if there is an edges_index already
@@ -343,139 +311,156 @@ void build_isolines(int graph_size,
                 switch (marching_case) {
                     case 0:
                         break;
-                    case 1:
-                    {
-                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 1: {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 2:
-                    {
-                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 2: {
+                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 3:
-                    {
+                    case 3: {
 
-                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 //                        std::cout << "Connect: " << index1 << ' ' << index2 << '\n';
                         break;
                     }
 
-                    case 4:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 4: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
 
-                    case 5:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 5: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
-                        int index3 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index4 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index3 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index4 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index3);
                         isolines_index.push_back(index4);
 
                         break;
                     }
-                    case 6:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 6: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
                         break;
                     }
-                    case 7:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 7: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
                         break;
                     }
-                    case 8:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 8: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
                         break;
                     }
-                    case 9:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 9: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
                         break;
                     }
-                    case 10:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 10: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
 
-                        int index3 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index4 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                        int index3 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index4 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index3);
                         isolines_index.push_back(index4);
                         break;
                     }
-                    case 11:
-                    {
-                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 11: {
+                        int index1 = push_edge(TOP, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 12:
-                    {
-                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 12: {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 13:
-                    {
-                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 13: {
+                        int index1 = push_edge(RIGHT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 14:
-                    {
-                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
-                        int index2 =  push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index, function_values);
+                    case 14: {
+                        int index1 = push_edge(LEFT, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
+                        int index2 = push_edge(BOTTOM, i, j, level, graph_size, isolines_vertex, edges_index,
+                                               function_values);
                         isolines_index.push_back(index1);
                         isolines_index.push_back(index2);
                         break;
                     }
-                    case 15:
-                    {
+                    case 15: {
                         break;
                     }
                     default:
@@ -512,13 +497,13 @@ void build_grid(std::vector<vertex> &grid_vertices,
         push_grid_vertex(grid_size - 1, 0, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
 
         // Z plane
-        push_grid_vertex(0, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(0, i , grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(0, grid_size - 1 , i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, i, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, i, grid_size - 1, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(0, grid_size - 1, i, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
 
         // Y plane
-        push_grid_vertex(i, grid_size - 1 , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
-        push_grid_vertex(grid_size - 1, i , 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(i, grid_size - 1, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
+        push_grid_vertex(grid_size - 1, i, 0, grid_size, grid_vertices, grid_vertex_to_index, grid_corners);
     }
 
     // MAIN GRID
@@ -550,11 +535,10 @@ void build_grid(std::vector<vertex> &grid_vertices,
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, grid_size - 1, i, grid_size)]);
     }
 
-
 }
 
-int main() try
-{
+
+int main() try {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         sdl2_fail("SDL_Init: ");
 
@@ -569,11 +553,11 @@ int main() try
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    SDL_Window * window = SDL_CreateWindow("Graphics course practice 4",
-                                           SDL_WINDOWPOS_CENTERED,
-                                           SDL_WINDOWPOS_CENTERED,
-                                           800, 600,
-                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+    SDL_Window *window = SDL_CreateWindow("Graphics course practice 4",
+                                          SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED,
+                                          800, 600,
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window)
         sdl2_fail("SDL_CreateWindow: ");
@@ -624,78 +608,65 @@ int main() try
     glBindVertexArray(vao);
 
 
-
     GLuint ebo;
     glGenBuffers(1, &ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, line_indices.size() * sizeof(line_indices[0]), line_indices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, line_indices.size() * sizeof(line_indices[0]), line_indices.data(),
+                 GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, position_xz)));
 
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, color)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, position_y)));
 
 
-    GLuint graph_vbo;
-    glGenBuffers(1, &graph_vbo);
 
-    // todo: init graph_vertices
-    std::vector<vertex> graph_vertices;
+
+
+    std::vector<vec2> graph_vertices_xz;
+    std::vector<rgba> graph_colors;
 
     int graph_size = 100;
-    std::vector<std::vector<float>> function_values(graph_size, std::vector<float>(graph_size, 0.f));
+//    std::vector<std::vector<float>> function_values(graph_size, std::vector<float>(graph_size, 0.f));
+    std::vector<float> function_values;
     for (int i = 0; i < graph_size; i++) {
         for (int j = 0; j < graph_size; j++) {
             auto point_x = grid_coordinate_to_float(j, graph_size);
             auto point_y = grid_coordinate_to_float(i, graph_size);
             auto point_z = function(point_x, point_y);
-            function_values[i][j] = point_z;
-            graph_vertices.push_back({
-                                             {
-                                                     point_x,
-                                                     point_z,
-                                                     point_y,
-                                             },
-                                             {
-                                                     std::uint8_t(255 * (1 - point_z)),
-                                                     std::uint8_t(255 * (1 - point_z)),
-                                                     255,
-                                                     0,
-                                             }
-                                     });
-//            std::cout << "(i, j) "  << i << ' ' << j << " (x, y, f) " << point_x << ' ' << point_y << ' ' << point_z << '\n';
+            function_values.push_back(point_z);
+            graph_vertices_xz.push_back(
+                    {
+                            point_x,
+                            point_y,
+                    }
+
+            );
+            graph_colors.push_back(
+                    {
+                            std::uint8_t(255 * (1 - point_z)),
+                            std::uint8_t(255 * (1 - point_z)),
+                            255,
+                            0,
+                    }
+            );
         }
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, graph_vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 graph_vertices.size() * sizeof(graph_vertices[0]),
-                 graph_vertices.data(), GL_STATIC_DRAW);
 
-    GLuint graph_vao;
-    glGenVertexArrays(1, &graph_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, graph_vbo);
-    glBindVertexArray(graph_vao);
-
-    // todo: init graph triangles
     std::vector<std::uint32_t> graph_triangles;
     for (int i = 0; i < graph_size - 1; i++) {
         for (int j = 0; j < graph_size - 1; j++) {
             graph_triangles.push_back(i * graph_size + j);
             graph_triangles.push_back(i * graph_size + graph_size + j);
             graph_triangles.push_back(i * graph_size + j + 1);
-//            std::cout << "Triangle: A " << graph_vertices[i * graph_size + j].position.x * graph_size<< ' ' <<
-//                                         graph_vertices[i * graph_size + j].position.z * graph_size<< ' ' <<
-//                                         graph_vertices[i * graph_size + j].position.y * 18<< ' ';
-//
-//            std::cout << " B " << graph_vertices[i * graph_size + j + 1].position.x * graph_size<< ' ' <<
-//                      graph_vertices[i * graph_size + j + 1].position.z * graph_size << ' ' <<
-//                      graph_vertices[i * graph_size + j + 1].position.y * 18 << ' ';
-//            std::cout << " C " << graph_vertices[i * graph_size + j + graph_size].position.x * graph_size<< ' ' <<
-//                      graph_vertices[i * graph_size + j + graph_size].position.z * graph_size<< ' ' <<
-//                      graph_vertices[i * graph_size + j + graph_size].position.y * 18 << ' ';
-//            std::cout << '\n';
 
             graph_triangles.push_back(i * graph_size + j + 1);
             graph_triangles.push_back(i * graph_size + graph_size + j);
@@ -704,19 +675,62 @@ int main() try
     }
 
 
+    GLuint vbo_xz;
+    glGenBuffers(1, &vbo_xz);
+
+    GLuint vbo_y;
+    glGenBuffers(1, &vbo_y);
+
+    GLuint vbo_rgba;
+    glGenBuffers(1, &vbo_rgba);
+
+
+    GLuint graph_vao;
+    glGenVertexArrays(1, &graph_vao);
+//    glBindBuffer(GL_ARRAY_BUFFER, vbo_xz);
+    glBindVertexArray(graph_vao);
+
+
+
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_xz);
+
+    glBufferData(GL_ARRAY_BUFFER,
+                 graph_vertices_xz.size() * sizeof(graph_vertices_xz[0]),
+                 graph_vertices_xz.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vec2),
+                          reinterpret_cast<void *>(0));
+
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_y);
+
+    glBufferData(GL_ARRAY_BUFFER,
+                 function_values.size() * sizeof(function_values[0]),
+                 function_values.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(float),
+                          reinterpret_cast<void *>(0));
+
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_rgba);
+
+    glBufferData(GL_ARRAY_BUFFER,
+                 graph_colors.size() * sizeof(graph_colors[0]),
+                 graph_colors.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(rgba), reinterpret_cast<void*>(0));
+
 
 
     GLuint graph_ebo;
     glGenBuffers(1, &graph_ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, graph_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, graph_triangles.size() * sizeof(graph_triangles[0]), graph_triangles.data(), GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
-
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
-
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, graph_triangles.size() * sizeof(graph_triangles[0]), graph_triangles.data(),
+                 GL_STATIC_DRAW);
 
     GLuint isolines_vbo;
     glGenBuffers(1, &isolines_vbo);
@@ -724,6 +738,7 @@ int main() try
     std::vector<vertex> isolines_vertex;
     std::vector<std::uint32_t> isolines_index;
     std::vector<float> isolines_levels; // should be sorted from lower to higher
+
     int isolines_size = 20;
     for (int i = 1; i <= isolines_size; i++) {
         isolines_levels.push_back(float(i) / float(isolines_size));
@@ -747,15 +762,20 @@ int main() try
     GLuint isolines_ebo;
     glGenBuffers(1, &isolines_ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, isolines_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, isolines_index.size() * sizeof(isolines_index[0]), isolines_index.data(),
+                 GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, position)));
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, position_xz)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, position_y)));
 
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), reinterpret_cast<void*>(offsetof(vertex, color)));
-
-
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex),
+                          reinterpret_cast<void *>(offsetof(vertex, color)));
 
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
@@ -779,18 +799,17 @@ int main() try
 
     float scale = 0.5f;
 
-    while (running)
-    {
+    while (running) {
 
         glClear(GL_DEPTH_BUFFER_BIT);
 
-        for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
-            {
+        for (SDL_Event event; SDL_PollEvent(&event);)
+            switch (event.type) {
                 case SDL_QUIT:
                     running = false;
                     break;
-                case SDL_WINDOWEVENT: switch (event.window.event)
-                    {
+                case SDL_WINDOWEVENT:
+                    switch (event.window.event) {
                         case SDL_WINDOWEVENT_RESIZED:
                             width = event.window.data1;
                             height = event.window.data2;
@@ -799,38 +818,27 @@ int main() try
                     }
                     break;
                 case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_LEFT)
-                    {
+                    if (event.key.keysym.sym == SDLK_LEFT) {
                         cube_x -= speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_RIGHT)
-                    {
+                    } else if (event.key.keysym.sym == SDLK_RIGHT) {
                         cube_x += speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_UP) {
+                    } else if (event.key.keysym.sym == SDLK_UP) {
                         cube_y += speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_DOWN) {
+                    } else if (event.key.keysym.sym == SDLK_DOWN) {
                         cube_y -= speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_s) {
+                    } else if (event.key.keysym.sym == SDLK_s) {
 //                        z_shift += speed * dt;
                         x_angle += speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_w) {
+                    } else if (event.key.keysym.sym == SDLK_w) {
 //                        z_shift -= speed * dt;
                         x_angle -= speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_d) {
+                    } else if (event.key.keysym.sym == SDLK_d) {
                         y_angle -= speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_a) {
+                    } else if (event.key.keysym.sym == SDLK_a) {
                         y_angle += speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_SPACE) {
+                    } else if (event.key.keysym.sym == SDLK_SPACE) {
                         scale += speed * dt;
-                    }
-                    else if (event.key.keysym.sym == SDLK_LSHIFT) {
+                    } else if (event.key.keysym.sym == SDLK_LSHIFT) {
                         scale -= speed * dt;
                     }
                     break;
@@ -861,7 +869,7 @@ int main() try
                 {
                         2 * near / (right - left), 0.f, (right + left) / (right - left), 0.f,
                         0.f, 2 * near / (top - bottom), (top + bottom) / (top - bottom), 0.f,
-                        0.f, 0.f, - (far + near) / (far - near), - (2 * far * near) / (far - near),
+                        0.f, 0.f, -(far + near) / (far - near), -(2 * far * near) / (far - near),
                         0.f, 0.f, -1.f, 0.f,
                 };
 
@@ -909,16 +917,15 @@ int main() try
 //        scale = 0.3;
 
         glBindVertexArray(vao);
-        glDrawElements(GL_LINES, line_indices.size() , GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_LINES, line_indices.size(), GL_UNSIGNED_INT, 0);
 
 
         glBindVertexArray(graph_vao);
-        glDrawElements(GL_TRIANGLES, graph_triangles.size() , GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, graph_triangles.size(), GL_UNSIGNED_INT, 0);
 
 
         glBindVertexArray(isolines_vao);
-        glDrawElements(GL_LINES, isolines_index.size() , GL_UNSIGNED_INT, 0);
-
+        glDrawElements(GL_LINES, isolines_index.size(), GL_UNSIGNED_INT, 0);
 
 
         SDL_GL_SwapWindow(window);
@@ -927,8 +934,7 @@ int main() try
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
 }
-catch (std::exception const & e)
-{
+catch (std::exception const &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
 }
