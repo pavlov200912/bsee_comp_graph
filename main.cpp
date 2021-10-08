@@ -136,14 +136,14 @@ void matrix_multiply(const float *a, const float *b, float *c, size_t size) {
 // [0, 1] * [0, 1] -> [0, 1]
 
 float metaballs(float x, float y, float time, const std::vector<vec3>& circles, const std::vector<float>& weights) {
-    float x_point = 6.0f * float(x) - 3.0f; // [0, 1] -> [-3, 3]
-    float y_point = 6.0f * float(y) - 3.0f;
+    float x_point = 20.0f * float(x) - 10.0f; // [0, 1] -> [-3, 3]
+    float y_point = 20.0f * float(y) - 10.0f;
     float result = 0.f;
     assert(circles.size() == weights.size());
     for (int i = 0; i < circles.size(); i++) {
-        result += weights[i] * exp(- (pow(x_point - circles[i].x, 2) + pow(y_point - circles[i].y, 2)) / pow(circles[i].z, 2));
+        result += weights[i] * exp(- (pow(x_point - circles[i].x, 2) + pow(y_point - circles[i].y, 2)) / pow(circles[i].z * 3, 2));
     }
-    return result / 2 + 0.5;
+    return result / 5 + 0.5 + sin((x_point + time) / 4) / 10 + sin((y_point + time) / 5) / 10;
 }
 
 float function(float x, float y, float time) {
@@ -655,7 +655,7 @@ int main() try {
     std::vector<vec2> graph_vertices_xz;
     std::vector<rgba> graph_colors;
 
-    int graph_size = 100;
+    int graph_size = 120;
 //    std::vector<std::vector<float>> function_values(graph_size, std::vector<float>(graph_size, 0.f));
     std::vector<float> function_values;
     for (int i = 0; i < graph_size; i++) {
@@ -800,6 +800,27 @@ int main() try {
                           reinterpret_cast<void *>(offsetof(vertex, color)));
 
 
+
+    std::vector<rgba> color_set;
+    color_set.push_back({255, 255, 255, 0});
+    for (int i = 0; i < 10; i++) {
+        color_set.push_back({255, std::uint8_t(255 - 25 * i), 255, 0});
+    }
+    color_set.push_back({255, 0, 255, 0});
+    for (int i = 0; i < 10; i++) {
+        color_set.push_back({255, 0, std::uint8_t(255 - 25 * i), 0});
+    }
+    color_set.push_back({255, 0, 0, 0});
+    for (int i = 0; i < 10; i++) {
+        color_set.push_back({255, std::uint8_t(25 * i), 0, 0});
+    }
+    color_set.push_back({255, 255, 0, 0});
+    for (int i = 0; i < 10; i++) {
+        color_set.push_back({255, 255, std::uint8_t(25 * i), 0});
+    }
+    color_set.push_back({255, 255, 255, 0});
+
+
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
     float time = 0.f;
@@ -935,8 +956,10 @@ int main() try {
 
         //         Update function
 
-        std::vector<vec3> circles = {{3 * sinf(time), 3 * cosf(time) * sinf(time), 1}};
-        std::vector<float> weigths = {1};
+        std::vector<vec3> circles = {{3 * sinf(time), 3 * cosf(time) * sinf(time), 1},
+                                     {3 * cosf(time), 3 * cosf(time) * sinf(time), 1},
+                                     {3 * sinf(time), 3 * cosf(time), 0.5}};
+        std::vector<float> weigths = {1, -1, -2};
         {
             function_values.clear();
             for (int i = 0; i < graph_size; i++) {
@@ -947,6 +970,8 @@ int main() try {
                     function_values.push_back(point_z);
                 }
             }
+
+
         }
 
         // update isolines
@@ -954,6 +979,44 @@ int main() try {
             isolines_vertex.clear();
             isolines_index.clear();
             build_isolines(graph_size, isolines_vertex, isolines_index, function_values, isolines_levels);
+        }
+
+
+        // update colors
+        {
+            graph_colors.clear();
+            for (int i = 0; i < graph_size; i++) {
+                for (int j = 0; j < graph_size; j++) {
+                    auto point_x = grid_coordinate_to_float(j, graph_size);
+                    auto point_y = grid_coordinate_to_float(i, graph_size);
+                    auto point_z = metaballs(point_x, point_y, time, circles, weigths);
+                    function_values.push_back(point_z);
+
+                    int i1 = int(point_z * color_set.size()) % color_set.size();
+                    int i2 = int(max(i1 - 1, 0)) % color_set.size();
+                    rgba c1 = color_set[i1];
+                    rgba c2 = color_set[i2];
+                    rgba new_color = {
+                            std::uint8_t((c1.r + c2.r) / 2),
+                            std::uint8_t((c1.g + c2.g) / 2),
+                            std::uint8_t((c1.b + c2.b) / 2),
+                            0
+                    };
+                    graph_colors.push_back(new_color);
+
+                }
+            }
+
+        }
+
+        // load colors
+        {
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_rgba);
+
+            glBufferData(GL_ARRAY_BUFFER,
+                         graph_colors.size() * sizeof(graph_colors[0]),
+                         graph_colors.data(), GL_STATIC_DRAW);
+
         }
 
         // load function
