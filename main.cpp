@@ -360,8 +360,6 @@ int main() try
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, 0, 0, grid_size)]);
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(i, grid_size - 1, 0, grid_size)]);
 
-        std::cout << grid_vertex_to_int(0, i, 0, grid_size) << '\n';
-        std::cout << grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)] << '\n';
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(0, i, 0, grid_size)]);
         line_indices.push_back(grid_vertex_to_index[grid_vertex_to_int(grid_size - 1, i, 0, grid_size)]);
 //
