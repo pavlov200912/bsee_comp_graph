@@ -35,14 +35,14 @@ const char vertex_shader_source[] =
 uniform mat4 view;
 uniform mat4 transform;
 layout (location = 0) in vec2 in_position_xz;
-layout (location = 1) in vec4 in_color;
+layout (location = 1) in vec3 in_color;
 layout (location = 2) in float in_position_y;
 
 out vec4 color;
 void main()
 {
 	gl_Position = view * transform * vec4(in_position_xz[0], in_position_y, in_position_xz[1], 1.0);
-	color = in_color;
+	color = vec4(in_color, 1.0);
 }
 )";
 
@@ -97,11 +97,10 @@ struct vec3 {
     float z;
 };
 
-struct rgba {
+struct rgb {
     uint8_t r;
     uint8_t g;
     uint8_t b;
-    uint8_t a;
 };
 
 
@@ -653,7 +652,7 @@ int main() try {
 
 
     std::vector<vec2> graph_vertices_xz;
-    std::vector<rgba> graph_colors;
+    std::vector<rgb> graph_colors;
 
     int graph_size = 120;
 //    std::vector<std::vector<float>> function_values(graph_size, std::vector<float>(graph_size, 0.f));
@@ -676,7 +675,6 @@ int main() try {
                             std::uint8_t(255 * min(1.f, abs(1 - point_z))),
                             std::uint8_t(255 * min(1.f, abs(1 - point_z))),
                             255,
-                            0,
                     }
             );
         }
@@ -744,7 +742,7 @@ int main() try {
                  graph_colors.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(rgba), reinterpret_cast<void*>(0));
+    glVertexAttribPointer(1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(rgb), reinterpret_cast<void*>(0));
 
 
 
@@ -801,24 +799,24 @@ int main() try {
 
 
 
-    std::vector<rgba> color_set;
-    color_set.push_back({255, 255, 255, 0});
+    std::vector<rgb> color_set;
+    color_set.push_back({255, 255, 255});
     for (int i = 0; i < 10; i++) {
-        color_set.push_back({255, std::uint8_t(255 - 25 * i), 255, 0});
+        color_set.push_back({255, std::uint8_t(255 - 25 * i), 255});
     }
-    color_set.push_back({255, 0, 255, 0});
+    color_set.push_back({255, 0, 255});
     for (int i = 0; i < 10; i++) {
-        color_set.push_back({255, 0, std::uint8_t(255 - 25 * i), 0});
+        color_set.push_back({255, 0, std::uint8_t(255 - 25 * i)});
     }
-    color_set.push_back({255, 0, 0, 0});
+    color_set.push_back({255, 0, 0});
     for (int i = 0; i < 10; i++) {
-        color_set.push_back({255, std::uint8_t(25 * i), 0, 0});
+        color_set.push_back({255, std::uint8_t(25 * i), 0});
     }
-    color_set.push_back({255, 255, 0, 0});
+    color_set.push_back({255, 255, 0});
     for (int i = 0; i < 10; i++) {
-        color_set.push_back({255, 255, std::uint8_t(25 * i), 0});
+        color_set.push_back({255, 255, std::uint8_t(25 * i)});
     }
-    color_set.push_back({255, 255, 255, 0});
+    color_set.push_back({255, 255, 255});
 
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
@@ -844,6 +842,8 @@ int main() try {
 
     int iteration = 0;
 
+    bool update_graph = false;
+    bool update_isolines = false;
 
     while (running) {
         iteration += 1;
@@ -886,6 +886,26 @@ int main() try {
                         scale += speed * dt;
                     } else if (event.key.keysym.sym == SDLK_LSHIFT) {
                         scale -= speed * dt;
+                    } else if (event.key.keysym.sym == SDLK_MINUS) {
+                        std::cout << "Graph size changed from " << graph_size << " to ";
+                        graph_size = int(max(1.0, graph_size - 1));
+                        std::cout << graph_size << '\n';
+                        update_graph = true;
+                    } else if (event.key.keysym.sym == SDLK_EQUALS) {
+                        std::cout << "Graph size changed from " << graph_size << " to ";
+                        graph_size += 1;
+                        std::cout << graph_size << '\n';
+                        update_graph = true;
+                    } else if (event.key.keysym.sym == SDLK_1) {
+                        std::cout << "Isoline size changed from " << isolines_size << " to ";
+                        isolines_size = int(max(1, isolines_size - 1));
+                        std::cout << isolines_size << '\n';
+                        update_isolines = true;
+                    } else if (event.key.keysym.sym == SDLK_2) {
+                        std::cout << "Isoline size changed from " << isolines_size << " to ";
+                        isolines_size += 1;
+                        std::cout << isolines_size << '\n';
+                        update_isolines = true;
                     }
                     break;
                 case SDL_KEYUP:
@@ -895,6 +915,55 @@ int main() try {
 
         if (!running)
             break;
+
+        if (update_graph) {
+            graph_vertices_xz.clear();
+            for (int i = 0; i < graph_size; i++) {
+                for (int j = 0; j < graph_size; j++) {
+                    auto point_x = grid_coordinate_to_float(j, graph_size);
+                    auto point_y = grid_coordinate_to_float(i, graph_size);
+                    graph_vertices_xz.push_back(
+                            {
+                                    point_x,
+                                    point_y,
+                            }
+
+                    );
+                }
+            }
+
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_xz);
+
+            glBufferData(GL_ARRAY_BUFFER,
+                         graph_vertices_xz.size() * sizeof(graph_vertices_xz[0]),
+                         graph_vertices_xz.data(), GL_STATIC_DRAW);
+
+            graph_triangles.clear();
+            for (int i = 0; i < graph_size - 1; i++) {
+                for (int j = 0; j < graph_size - 1; j++) {
+                    graph_triangles.push_back(i * graph_size + j);
+                    graph_triangles.push_back(i * graph_size + graph_size + j);
+                    graph_triangles.push_back(i * graph_size + j + 1);
+
+                    graph_triangles.push_back(i * graph_size + j + 1);
+                    graph_triangles.push_back(i * graph_size + graph_size + j);
+                    graph_triangles.push_back(i * graph_size + graph_size + j + 1);
+                }
+            }
+
+            std::cout << "Graph updated\n";
+
+            update_graph = false;
+        }
+
+        if (update_isolines) {
+            std::cout << "Isolines updated\n";
+            isolines_levels.clear();
+            for (int i = 1; i <= isolines_size; i++) {
+                isolines_levels.push_back(float(i) / float(isolines_size));
+            }
+            update_isolines = false;
+        }
 
         auto now = std::chrono::high_resolution_clock::now();
         dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
@@ -994,18 +1063,21 @@ int main() try {
 
                     int i1 = int(point_z * color_set.size()) % color_set.size();
                     int i2 = int(max(i1 - 1, 0)) % color_set.size();
-                    rgba c1 = color_set[i1];
-                    rgba c2 = color_set[i2];
-                    rgba new_color = {
+                    rgb c1 = color_set[i1];
+                    rgb c2 = color_set[i2];
+                    rgb new_color = {
                             std::uint8_t((c1.r + c2.r) / 2),
                             std::uint8_t((c1.g + c2.g) / 2),
-                            std::uint8_t((c1.b + c2.b) / 2),
-                            0
+                            std::uint8_t((c1.b + c2.b) / 2)
                     };
                     graph_colors.push_back(new_color);
 
                 }
             }
+
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, graph_ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, graph_triangles.size() * sizeof(graph_triangles[0]), graph_triangles.data(),
+                         GL_STATIC_DRAW);
 
         }
 
