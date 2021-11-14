@@ -1,0 +1,8 @@
+//
+// Created by Ivan.Pavlov on 09.11.2021.
+//
+
+#ifndef PRACTICE8_TINY_OBJ_LOADER_H
+#define PRACTICE8_TINY_OBJ_LOADER_H
+
+#endif //PRACTICE8_TINY_OBJ_LOADER_H
